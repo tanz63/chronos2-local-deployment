@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Chronos-2 模型部署和推理接口
-兼容 chronos-forecasting 1.x 版本
+使用 chronos-forecasting >= 2.0
 """
 
 import torch
 import pandas as pd
 import numpy as np
-from chronos import ChronosPipeline
+from chronos import Chronos2Pipeline
 from typing import Optional, List, Union
 import logging
 
@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 class Chronos2Forecaster:
     """Chronos-2 时序预测器"""
     
-    def __init__(self, model_id: str = "amazon/chronos-t5-small", device: Optional[str] = None):
+    def __init__(self, model_id: str = "amazon/chronos-2", device: Optional[str] = None):
         """
         初始化 Chronos-2 预测器
         
         Args:
-            model_id: HuggingFace 模型 ID
+            model_id: HuggingFace 模型 ID (默认 amazon/chronos-2)
             device: 计算设备 ('cuda', 'cpu', 或 None 自动选择)
         """
         self.model_id = model_id
@@ -33,14 +33,14 @@ class Chronos2Forecaster:
     
     def _load_model(self):
         """加载模型"""
-        logger.info(f"Loading Chronos model: {self.model_id}")
+        logger.info(f"Loading Chronos-2 model: {self.model_id}")
         logger.info(f"Using device: {self.device}")
         
-        self.pipeline = ChronosPipeline.from_pretrained(
+        self.pipeline = Chronos2Pipeline.from_pretrained(
             self.model_id,
             device_map=self.device
         )
-        logger.info("Model loaded successfully!")
+        logger.info("Chronos-2 model loaded successfully!")
     
     def predict(
         self,
@@ -78,22 +78,22 @@ class Chronos2Forecaster:
         forecast = self.pipeline.predict(
             context=[context_tensor],
             prediction_length=prediction_length,
+            quantile_levels=quantile_levels,
             num_samples=num_samples
         )
         
-        # 计算分位数
+        # 提取分位数预测
         results = {
+            'model': self.model_id,
             'quantile_levels': quantile_levels,
             'prediction_length': prediction_length,
         }
         
-        # 从样本计算分位数
-        forecast_np = forecast.numpy()
-        for q in quantile_levels:
-            results[f'q{int(q*100)}'] = np.percentile(forecast_np[0], q * 100, axis=0)
+        for i, q in enumerate(quantile_levels):
+            results[f'q{int(q*100)}'] = forecast[0, :, i].numpy()
         
-        # 计算均值预测
-        results['mean'] = np.mean(forecast_np[0], axis=0)
+        # 使用 q50 作为均值
+        results['mean'] = results.get('q50', forecast[0, :, 1].numpy())
         
         return results
     
@@ -108,10 +108,7 @@ class Chronos2Forecaster:
         quantile_levels: Optional[List[float]] = None
     ) -> pd.DataFrame:
         """
-        带协变量的时序预测（简化版本）
-        
-        Note: chronos-forecasting 1.x 版本原生不支持协变量，
-        这里通过特征工程将协变量信息编码到目标序列中
+        带协变量的时序预测 (Chronos-2 原生支持)
         
         Args:
             context_df: 历史数据 (包含 target 和 covariates)
@@ -129,44 +126,23 @@ class Chronos2Forecaster:
             quantile_levels = [0.1, 0.5, 0.9]
         
         logger.info(f"Predicting with covariates: {prediction_length} steps")
-        logger.info("Note: Using covariate-adjusted context for prediction")
         
-        # 获取目标序列
-        context = context_df[target_col].values
-        
-        # 执行预测
-        forecast = self.predict(
-            context=context,
+        forecast = self.pipeline.predict_df(
+            context_df=context_df,
+            future_df=future_df,
             prediction_length=prediction_length,
-            quantile_levels=quantile_levels
+            quantile_levels=quantile_levels,
+            id_column=id_col,
+            timestamp_column=timestamp_col,
+            target=target_col
         )
         
-        # 构建结果 DataFrame
-        results = []
-        for i in range(prediction_length):
-            row = {
-                timestamp_col: future_df[timestamp_col].iloc[i] if timestamp_col in future_df.columns else i,
-                id_col: context_df[id_col].iloc[0] if id_col in context_df.columns else 'series_1',
-            }
-            
-            # 添加协变量
-            for col in future_df.columns:
-                if col not in [timestamp_col, id_col]:
-                    row[col] = future_df[col].iloc[i]
-            
-            # 添加预测值
-            for q in quantile_levels:
-                row[f'{target_col}_q{int(q*100)}'] = forecast[f'q{int(q*100)}'][i]
-            
-            row[f'{target_col}_mean'] = forecast['mean'][i]
-            results.append(row)
-        
-        return pd.DataFrame(results)
+        return forecast
 
 
 if __name__ == "__main__":
     # 简单测试
-    print("Testing Chronos2Forecaster...")
+    print("Testing Chronos2Forecaster with Chronos-2...")
     forecaster = Chronos2Forecaster()
     
     # 生成测试数据
@@ -176,4 +152,4 @@ if __name__ == "__main__":
     results = forecaster.predict(test_data, prediction_length=24)
     print(f"Prediction shape: {results['mean'].shape}")
     print(f"Quantiles: {results['quantile_levels']}")
-    print("Test passed!")
+    print("Chronos-2 test passed!")
