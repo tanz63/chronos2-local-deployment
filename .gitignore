@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Conda
+*.conda
+*.env
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Model files - 排除大型模型文件
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+chronos-2/
+
+# Data files (可以保留示例数据，但大型数据集排除)
+data/*.csv
+data/*.parquet
+!data/sample_*.csv
+
+# Output files
+outputs/
+results/
+*.png
+*.jpg
+*.pdf
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

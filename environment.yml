@@ -1,0 +1,23 @@
+name: chronos2-env
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - jupyter
+  - pip:
+    - "chronos-forecasting>=2.0"
+    - torch
+    - transformers
+    - accelerate
+    - huggingface-hub
+    - plotly
+    - pytest
+    - pytest-asyncio
+    - pytest-cov
