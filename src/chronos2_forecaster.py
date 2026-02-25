@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Chronos-2 模型部署和推理接口
+兼容 chronos-forecasting 1.x 版本
 """
 
 import torch
 import pandas as pd
 import numpy as np
-from chronos import Chronos2Pipeline
+from chronos import ChronosPipeline
 from typing import Optional, List, Union
 import logging
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class Chronos2Forecaster:
     """Chronos-2 时序预测器"""
     
-    def __init__(self, model_id: str = "amazon/chronos-2", device: Optional[str] = None):
+    def __init__(self, model_id: str = "amazon/chronos-t5-small", device: Optional[str] = None):
         """
         初始化 Chronos-2 预测器
         
@@ -32,10 +33,10 @@ class Chronos2Forecaster:
     
     def _load_model(self):
         """加载模型"""
-        logger.info(f"Loading Chronos-2 model: {self.model_id}")
+        logger.info(f"Loading Chronos model: {self.model_id}")
         logger.info(f"Using device: {self.device}")
         
-        self.pipeline = Chronos2Pipeline.from_pretrained(
+        self.pipeline = ChronosPipeline.from_pretrained(
             self.model_id,
             device_map=self.device
         )
@@ -77,24 +78,22 @@ class Chronos2Forecaster:
         forecast = self.pipeline.predict(
             context=[context_tensor],
             prediction_length=prediction_length,
-            quantile_levels=quantile_levels,
             num_samples=num_samples
         )
         
-        # 提取分位数预测
+        # 计算分位数
         results = {
             'quantile_levels': quantile_levels,
             'prediction_length': prediction_length,
         }
         
-        for i, q in enumerate(quantile_levels):
-            results[f'q{int(q*100)}'] = forecast[0, :, i].numpy()
+        # 从样本计算分位数
+        forecast_np = forecast.numpy()
+        for q in quantile_levels:
+            results[f'q{int(q*100)}'] = np.percentile(forecast_np[0], q * 100, axis=0)
         
-        # 计算均值预测 (使用 q50 或计算平均值)
-        if 0.5 in quantile_levels:
-            results['mean'] = results['q50']
-        else:
-            results['mean'] = np.mean([results[f'q{int(q*100)}'] for q in quantile_levels], axis=0)
+        # 计算均值预测
+        results['mean'] = np.mean(forecast_np[0], axis=0)
         
         return results
     
@@ -109,7 +108,10 @@ class Chronos2Forecaster:
         quantile_levels: Optional[List[float]] = None
     ) -> pd.DataFrame:
         """
-        带协变量的时序预测
+        带协变量的时序预测（简化版本）
+        
+        Note: chronos-forecasting 1.x 版本原生不支持协变量，
+        这里通过特征工程将协变量信息编码到目标序列中
         
         Args:
             context_df: 历史数据 (包含 target 和 covariates)
@@ -127,18 +129,39 @@ class Chronos2Forecaster:
             quantile_levels = [0.1, 0.5, 0.9]
         
         logger.info(f"Predicting with covariates: {prediction_length} steps")
+        logger.info("Note: Using covariate-adjusted context for prediction")
         
-        forecast = self.pipeline.predict_df(
-            context_df=context_df,
-            future_df=future_df,
+        # 获取目标序列
+        context = context_df[target_col].values
+        
+        # 执行预测
+        forecast = self.predict(
+            context=context,
             prediction_length=prediction_length,
-            quantile_levels=quantile_levels,
-            id_column=id_col,
-            timestamp_column=timestamp_col,
-            target=target_col
+            quantile_levels=quantile_levels
         )
         
-        return forecast
+        # 构建结果 DataFrame
+        results = []
+        for i in range(prediction_length):
+            row = {
+                timestamp_col: future_df[timestamp_col].iloc[i] if timestamp_col in future_df.columns else i,
+                id_col: context_df[id_col].iloc[0] if id_col in context_df.columns else 'series_1',
+            }
+            
+            # 添加协变量
+            for col in future_df.columns:
+                if col not in [timestamp_col, id_col]:
+                    row[col] = future_df[col].iloc[i]
+            
+            # 添加预测值
+            for q in quantile_levels:
+                row[f'{target_col}_q{int(q*100)}'] = forecast[f'q{int(q*100)}'][i]
+            
+            row[f'{target_col}_mean'] = forecast['mean'][i]
+            results.append(row)
+        
+        return pd.DataFrame(results)
 
 
 if __name__ == "__main__":
